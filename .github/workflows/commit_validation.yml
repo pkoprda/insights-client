@@ -1,0 +1,54 @@
+---
+name: Commit Validation
+
+on:
+  pull_request:
+
+jobs:
+  check-commit-message:
+    name: Check Commit Messages
+    runs-on: ubuntu-latest
+    container:
+      image: "registry.fedoraproject.org/fedora:latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI
+        run: |
+          dnf install -y gh
+
+      - name: Authenticate with GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Get Commit Messages
+        run: |
+          gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/commits --jq '.[].commit.message' > commits.txt
+
+      - name: Validate Commit Messages
+        run: |
+          while IFS= read -r commit; do
+            subject=$(echo "$commit" | sed -n '1p')
+
+            if [[ ${#subject} -gt 72 ]]; then
+              echo "Error: Commit message subject line exceeds 72 characters."
+              exit 1
+            fi
+            if [[ ! $subject =~ ^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?:\ .+$ ]]; then
+              echo "Error: Commit message subject line does not follow conventional commit format."
+              exit 1
+            fi
+
+            echo $commit
+            if [[ ! $commit =~ CCT-[0-9]+ ]]; then
+              echo "Error: Commit must contain a valid Jira reference."
+              exit 1
+            fi
+
+            echo "$commit" | tail -n +4 | while IFS= read -r line; do
+              if [[ ${#line} -gt 72 ]]; then
+                echo "Error: Commit message description line exceeds 72 characters."
+                exit 1
+              fi
+            done
+          done < commits.txt
